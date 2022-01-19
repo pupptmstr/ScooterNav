@@ -15,7 +15,10 @@ import java.util.*
 
 class MainActivity : AppCompatActivity() {
     private lateinit var mapFragment: MapFragment
-    private val REQUEST_PERMISSIONS_REQUEST_CODE = 1;
+    private val REQUEST_PERMISSIONS_REQUEST_CODE = 1
+    private val FRAGMENT_TAG = "com.pupptmstr.MAP_FRAGMENT_TAG"
+
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState);
 
@@ -29,21 +32,12 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         val fm = this.supportFragmentManager
-        mapFragment = MapFragment.newInstance()
-        fm.beginTransaction().add(R.id.map_container, mapFragment).commit();
+        if (fm.findFragmentByTag(FRAGMENT_TAG) == null) {
+            mapFragment = MapFragment.newInstance()
+            fm.beginTransaction().add(R.id.map_container, mapFragment, FRAGMENT_TAG).commit()
+        }
 
         getInstance().load(this, PreferenceManager.getDefaultSharedPreferences(this));
-
-
-//        //set start point and zoom by fingers
-//        map = findViewById<MapView>(R.id.map_container)
-//        map.setTileSource(TileSourceFactory.MAPNIK)
-//        val mapController = map.controller
-//        mapController.setZoom(9.5)
-//        val startPoint = GeoPoint(59.9, 30.3)
-//        mapController.setCenter(startPoint)
-//        mapController.setZoom(11.5)
-//        map.setMultiTouchControls(true)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {

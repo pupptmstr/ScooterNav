@@ -4,20 +4,34 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.util.Log
-import android.view.*
+import android.view.LayoutInflater
+import android.view.Menu
+import android.view.View
+import android.view.ViewGroup
 import androidx.fragment.app.Fragment
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import com.google.gson.FieldNamingPolicy
+import com.google.gson.GsonBuilder
+import com.pupptmstr.scooternav.models.PathQueryResult
+import com.pupptmstr.scooternav.models.RequestPathWebsocketMessage
+import io.ktor.client.*
+import io.ktor.client.engine.cio.*
+import io.ktor.client.plugins.websocket.*
+import io.ktor.http.*
+import io.ktor.websocket.*
+import kotlinx.coroutines.*
+import org.osmdroid.bonuspack.routing.OSRMRoadManager
+import org.osmdroid.bonuspack.routing.RoadManager
+import org.osmdroid.bonuspack.routing.RoadNode
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.compass.CompassOverlay
 import org.osmdroid.views.overlay.compass.InternalCompassOrientationProvider
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 import java.util.concurrent.atomic.AtomicBoolean
+
 
 class MapFragment : Fragment() {
     private var mPrefs: SharedPreferences? = null
@@ -25,6 +39,16 @@ class MapFragment : Fragment() {
     private var mLocationOverlay: MyLocationNewOverlay? = null
     private var mCompassOverlay: CompassOverlay? = null
     private var isPrinting: AtomicBoolean = AtomicBoolean(false)
+    private val client = HttpClient(CIO.create {
+        requestTimeout = 0
+    }) {
+        expectSuccess = false
+
+        install(WebSockets) {
+            pingInterval = -1L
+        }
+    }
+    lateinit var webSocketSession: WebSocketSession
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -41,6 +65,7 @@ class MapFragment : Fragment() {
         return mMapView!!
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     override fun onActivityCreated(savedInstanceState: Bundle?) {
         super.onActivityCreated(savedInstanceState)
         val context: Context = this.requireActivity().applicationContext
@@ -54,6 +79,10 @@ class MapFragment : Fragment() {
             printMyLocation()
         }
 
+        CoroutineScope(Dispatchers.IO).launch {
+            getWebSocketConnection()
+        }
+
 
         //On screen compass
         mCompassOverlay = CompassOverlay(
@@ -63,6 +92,38 @@ class MapFragment : Fragment() {
         mCompassOverlay!!.enableCompass()
         mMapView!!.overlays.add(mCompassOverlay)
 
+//        //marker overlay
+//        val marker = Marker(mMapView)
+//        marker.position = GeoPoint(59.9, 30.3)
+//        marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+//        marker.title = "Start point"
+//        mMapView!!.overlays.add(marker)
+
+        //Roads
+        val roadManager: RoadManager = OSRMRoadManager(context, "MY_USER_AGENT")
+        val startPoint = GeoPoint(60.0511855, 30.44211)
+        val waypoints = ArrayList<GeoPoint>()
+        waypoints.add(startPoint)
+        val endPoint = GeoPoint(60.0582673, 30.4368031)
+        waypoints.add(endPoint)
+
+
+        val road = CoroutineScope(Dispatchers.IO).async {
+            (roadManager as OSRMRoadManager).setMean(OSRMRoadManager.MEAN_BY_FOOT)
+            roadManager.getRoad(waypoints)
+        }
+
+        while (road.isActive) Unit
+
+        for (i in 0 until road.getCompleted().mNodes.size) {
+            val node: RoadNode = road.getCompleted().mNodes[i]
+            val nodeMarker = Marker(mMapView)
+            nodeMarker.position = node.mLocation
+            nodeMarker.title = node.mInstructions
+            mMapView!!.overlays.add(nodeMarker)
+        }
+        val roadOverlay = RoadManager.buildRoadOverlay(road.getCompleted())
+        mMapView!!.overlays.add(roadOverlay)
 
         //needed for pinch zooms
         mMapView!!.setMultiTouchControls(true)
@@ -123,6 +184,41 @@ class MapFragment : Fragment() {
                             "долгота: ${mLocationOverlay!!.myLocation.longitude};"
                 )
                 delay(5000)
+            }
+        }
+    }
+
+    private suspend fun getWebSocketConnection() {
+        val gson = GsonBuilder().setPrettyPrinting()
+            .setFieldNamingPolicy(FieldNamingPolicy.UPPER_CAMEL_CASE).create()
+        client.ws(
+            method = HttpMethod.Get,
+            host = "pupptmstr.simsim.ftp.sh",
+            port = 4115,
+            path = "/api/v1/client"
+        ) {
+            try {
+                webSocketSession = this
+                while (isPrinting.get()) {
+                    if (mLocationOverlay != null && mLocationOverlay?.myLocation != null) {
+                        val pathRequest = RequestPathWebsocketMessage(334409, 9724356897)
+                        val message = gson.toJson(pathRequest).toString()
+                        send(Frame.Text(message))
+                        when (val respond = incoming.receive()) {
+                            is Frame.Text -> {
+                                val respondMessage = respond.readText()
+                                val respondBody =
+                                    gson.fromJson(respondMessage, PathQueryResult::class.java)
+                                Log.i("myPath", "Path length = ${respondBody.totalLength}")
+                            }
+
+                            else -> {}
+                        }
+                        delay(15000)
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
     }

@@ -2,13 +2,10 @@ package com.pupptmstr.scooternav
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.location.Location
-import android.location.LocationListener
 import android.os.Bundle
 import android.util.Log
 import android.view.*
 import android.widget.ImageButton
-import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import com.github.anastr.speedviewlib.TubeSpeedometer
@@ -33,16 +30,12 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.overlay.ScaleBarOverlay
-import org.osmdroid.views.overlay.compass.CompassOverlay
-import org.osmdroid.views.overlay.compass.InternalCompassOrientationProvider
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
-import org.osmdroid.views.overlay.mylocation.IMyLocationConsumer
-import org.osmdroid.views.overlay.mylocation.IMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 import java.util.concurrent.atomic.AtomicBoolean
 
 
-class MapFragment : Fragment(), IMyLocationConsumer {
+class MapFragment : Fragment() {
     private var mPrefs: SharedPreferences? = null
     private var mMapView: MapView? = null
     private var mLocationOverlay: MyLocationNewOverlay? = null
@@ -84,17 +77,21 @@ class MapFragment : Fragment(), IMyLocationConsumer {
         super.onActivityCreated(savedInstanceState)
         val context: Context = this.requireActivity().applicationContext
         speedometer = requireActivity().findViewById(R.id.speedView)
-        speedometer!!.maxSpeed = 50f
+        speedometer!!.maxSpeed = 40f
         speedometer!!.setStartDegree(170)
         speedometer!!.setEndDegree(370)
-        speedometer!!.indicator.width = 2f
+        speedometer!!.withTremble = false
         //My Location
         mLocationOverlay = MyLocationNewOverlay(GpsMyLocationProvider(context), mMapView)
         mMapView!!.overlays.add(mLocationOverlay)
         isPrinting.set(true)
 
+
         CoroutineScope(Dispatchers.IO).launch {
-            printMyLocation()
+            while (isPrinting.get()) {
+                mapViewModel.getCurrentSpeedAndLocation(mLocationOverlay)
+                delay(2000)
+            }
         }
 
 //        CoroutineScope(Dispatchers.IO).launch {
@@ -109,7 +106,6 @@ class MapFragment : Fragment(), IMyLocationConsumer {
         mMapView!!.isFlingEnabled = true
         mMapView!!.overlays.add(mScaleBarOverlay)
         mLocationOverlay!!.enableMyLocation()
-        mLocationOverlay!!.enableFollowLocation()
         mLocationOverlay!!.isOptionsMenuEnabled = true
 
         btCenterMap = requireActivity().findViewById(R.id.ic_center_map)
@@ -145,7 +141,7 @@ class MapFragment : Fragment(), IMyLocationConsumer {
 //        waypoints.add(endPoint)
 
 
-        mapViewModel.liveData.observe(requireActivity()) {
+        mapViewModel.road.observe(requireActivity()) {
             val nodeMarkers = mutableListOf<Marker>()
             for (i in 0 until it.mNodes.size) {
                 val node: RoadNode = it.mNodes[i]
@@ -162,6 +158,14 @@ class MapFragment : Fragment(), IMyLocationConsumer {
             }
             mMapView!!.overlays.add(roadOverlay)
             mMapView!!.overlays.addAll(nodeMarkers)
+        }
+
+        mapViewModel.speed.observe(requireActivity()) {
+            gpsSpeed = it
+            speedometer!!.speedTo(gpsSpeed, 100)
+            if (mLocationOverlay!!.isFollowLocationEnabled) {
+                mMapView!!.controller.animateTo(mLocationOverlay!!.myLocation)
+            }
         }
 
         //needed for pinch zooms
@@ -214,21 +218,6 @@ class MapFragment : Fragment(), IMyLocationConsumer {
         mMapView!!.invalidate()
     }
 
-
-    override fun onLocationChanged(location: Location?, source: IMyLocationProvider?) {
-        if (mMapView == null || speedometer == null || location == null) return
-        gpsSpeed = location.speed
-        Toast.makeText(context, gpsSpeed.toString(), Toast.LENGTH_SHORT).show()
-        speedometer!!.speedTo(gpsSpeed, 100)
-        if (mLocationOverlay != null && mLocationOverlay?.myLocation != null && mLocationOverlay!!.isFollowLocationEnabled) {
-            val myPosition =
-                GeoPoint(
-                    mLocationOverlay!!.myLocation.latitude,
-                    mLocationOverlay!!.myLocation.longitude
-                )
-            mMapView!!.controller.animateTo(myPosition)
-        }
-    }
 
     companion object {
         private const val PREFS_NAME = "org.andnav.osm.prefs"
@@ -288,10 +277,28 @@ class MapFragment : Fragment(), IMyLocationConsumer {
                             "широта: ${mLocationOverlay!!.myLocation.latitude};\n" +
                             "долгота: ${mLocationOverlay!!.myLocation.longitude};"
                 )
-                delay(5000)
+                val location = mLocationOverlay!!.mMyLocationProvider.lastKnownLocation
+                gpsSpeed = location.speed
+                speedometer!!.speedTo(gpsSpeed, 100)
+                delay(1000)
             }
         }
     }
+
+//    override fun onLocationChanged(location: Location?, source: IMyLocationProvider?) {
+//        if (mMapView == null || speedometer == null || location == null) return
+//        gpsSpeed = location.speed
+//        Toast.makeText(context, gpsSpeed.toString(), Toast.LENGTH_SHORT).show()
+//        speedometer!!.speedTo(gpsSpeed, 100)
+//        if (mLocationOverlay != null && mLocationOverlay?.myLocation != null && mLocationOverlay!!.isFollowLocationEnabled) {
+//            val myPosition =
+//                GeoPoint(
+//                    mLocationOverlay!!.myLocation.latitude,
+//                    mLocationOverlay!!.myLocation.longitude
+//                )
+//            mMapView!!.controller.animateTo(myPosition)
+//        }
+//    }
 
 }
 

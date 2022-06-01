@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">ScooterNav</string>
+    <string name="center_map_on_me_button">center map on me button</string>
+    <string name="follow_my_location_button">follow_my_location_button</string>
 </resources>

@@ -2,13 +2,16 @@ package com.pupptmstr.scooternav
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.location.Location
+import android.location.LocationListener
 import android.os.Bundle
 import android.util.Log
-import android.view.LayoutInflater
-import android.view.Menu
-import android.view.View
-import android.view.ViewGroup
+import android.view.*
+import android.widget.ImageButton
+import android.widget.Toast
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.ViewModelProvider
+import com.github.anastr.speedviewlib.TubeSpeedometer
 import com.google.gson.FieldNamingPolicy
 import com.google.gson.GsonBuilder
 import com.pupptmstr.scooternav.models.PathQueryResult
@@ -18,27 +21,38 @@ import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.websocket.*
 import io.ktor.http.*
 import io.ktor.websocket.*
-import kotlinx.coroutines.*
-import org.osmdroid.bonuspack.routing.OSRMRoadManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.osmdroid.bonuspack.routing.RoadManager
 import org.osmdroid.bonuspack.routing.RoadNode
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polyline
+import org.osmdroid.views.overlay.ScaleBarOverlay
 import org.osmdroid.views.overlay.compass.CompassOverlay
 import org.osmdroid.views.overlay.compass.InternalCompassOrientationProvider
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
+import org.osmdroid.views.overlay.mylocation.IMyLocationConsumer
+import org.osmdroid.views.overlay.mylocation.IMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 import java.util.concurrent.atomic.AtomicBoolean
 
 
-class MapFragment : Fragment() {
+class MapFragment : Fragment(), IMyLocationConsumer {
     private var mPrefs: SharedPreferences? = null
     private var mMapView: MapView? = null
     private var mLocationOverlay: MyLocationNewOverlay? = null
-    private var mCompassOverlay: CompassOverlay? = null
+    private var mScaleBarOverlay: ScaleBarOverlay? = null
+    private var btCenterMap: ImageButton? = null
+    private var btFollowMe: ImageButton? = null
+    private var speedometer: TubeSpeedometer? = null
+    private var gpsSpeed = 0f
     private var isPrinting: AtomicBoolean = AtomicBoolean(false)
+    lateinit var mapViewModel: MapViewModel
     private val client = HttpClient(CIO.create {
         requestTimeout = 0
     }) {
@@ -65,65 +79,90 @@ class MapFragment : Fragment() {
         return mMapView!!
     }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
     override fun onActivityCreated(savedInstanceState: Bundle?) {
+        mapViewModel = ViewModelProvider(requireActivity()).get(MapViewModel::class.java)
         super.onActivityCreated(savedInstanceState)
         val context: Context = this.requireActivity().applicationContext
-
+        speedometer = requireActivity().findViewById(R.id.speedView)
+        speedometer!!.maxSpeed = 50f
+        speedometer!!.setStartDegree(170)
+        speedometer!!.setEndDegree(370)
+        speedometer!!.indicator.width = 2f
         //My Location
         mLocationOverlay = MyLocationNewOverlay(GpsMyLocationProvider(context), mMapView)
-        mLocationOverlay!!.enableMyLocation()
         mMapView!!.overlays.add(mLocationOverlay)
         isPrinting.set(true)
+
         CoroutineScope(Dispatchers.IO).launch {
             printMyLocation()
         }
 
-        CoroutineScope(Dispatchers.IO).launch {
-            getWebSocketConnection()
+//        CoroutineScope(Dispatchers.IO).launch {
+//            getWebSocketConnection()
+//        }
+
+        //Follow me buttons
+        val dm = context.resources.displayMetrics
+        mScaleBarOverlay = ScaleBarOverlay(mMapView)
+        mScaleBarOverlay!!.setCentred(true)
+        mScaleBarOverlay!!.setScaleBarOffset(dm.widthPixels / 2, 10)
+        mMapView!!.isFlingEnabled = true
+        mMapView!!.overlays.add(mScaleBarOverlay)
+        mLocationOverlay!!.enableMyLocation()
+        mLocationOverlay!!.enableFollowLocation()
+        mLocationOverlay!!.isOptionsMenuEnabled = true
+
+        btCenterMap = requireActivity().findViewById(R.id.ic_center_map)
+        btCenterMap!!.setOnClickListener {
+            if (mLocationOverlay != null && mLocationOverlay?.myLocation != null) {
+                val myPosition =
+                    GeoPoint(
+                        mLocationOverlay!!.myLocation.latitude,
+                        mLocationOverlay!!.myLocation.longitude
+                    )
+                mMapView!!.controller.animateTo(myPosition)
+            }
         }
 
+        btFollowMe = requireActivity().findViewById(R.id.ic_follow_me)
 
-        //On screen compass
-        mCompassOverlay = CompassOverlay(
-            context, InternalCompassOrientationProvider(context),
-            mMapView
-        )
-        mCompassOverlay!!.enableCompass()
-        mMapView!!.overlays.add(mCompassOverlay)
-
-//        //marker overlay
-//        val marker = Marker(mMapView)
-//        marker.position = GeoPoint(59.9, 30.3)
-//        marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-//        marker.title = "Start point"
-//        mMapView!!.overlays.add(marker)
+        btFollowMe!!.setOnClickListener {
+            if (!mLocationOverlay!!.isFollowLocationEnabled) {
+                mLocationOverlay!!.enableFollowLocation()
+                btFollowMe!!.setImageResource(R.drawable.ic_follow_me_on)
+            } else {
+                mLocationOverlay!!.disableFollowLocation()
+                btFollowMe!!.setImageResource(R.drawable.ic_follow_me)
+            }
+        }
 
         //Roads
-        val roadManager: RoadManager = OSRMRoadManager(context, "MY_USER_AGENT")
-        val startPoint = GeoPoint(60.0511855, 30.44211)
-        val waypoints = ArrayList<GeoPoint>()
-        waypoints.add(startPoint)
-        val endPoint = GeoPoint(60.0582673, 30.4368031)
-        waypoints.add(endPoint)
+//        val roadManager: RoadManager = OSRMRoadManager(context, "MY_USER_AGENT")
+//        val startPoint = GeoPoint(60.0511855, 30.44211)
+//        val waypoints = ArrayList<GeoPoint>()
+//        waypoints.add(startPoint)
+//        val endPoint = GeoPoint(60.0582673, 30.4368031)
+//        waypoints.add(endPoint)
 
 
-        val road = CoroutineScope(Dispatchers.IO).async {
-            (roadManager as OSRMRoadManager).setMean(OSRMRoadManager.MEAN_BY_FOOT)
-            roadManager.getRoad(waypoints)
+        mapViewModel.liveData.observe(requireActivity()) {
+            val nodeMarkers = mutableListOf<Marker>()
+            for (i in 0 until it.mNodes.size) {
+                val node: RoadNode = it.mNodes[i]
+                val nodeMarker = Marker(mMapView)
+                nodeMarker.position = node.mLocation
+                nodeMarker.title = node.mInstructions
+                nodeMarkers.add(nodeMarker)
+            }
+            val roadOverlay = RoadManager.buildRoadOverlay(it)
+            for (overlay in mMapView!!.overlays) {
+                if (overlay is Polyline || overlay is Marker) {
+                    mMapView!!.overlays.remove(overlay)
+                }
+            }
+            mMapView!!.overlays.add(roadOverlay)
+            mMapView!!.overlays.addAll(nodeMarkers)
         }
-
-        while (road.isActive) Unit
-
-        for (i in 0 until road.getCompleted().mNodes.size) {
-            val node: RoadNode = road.getCompleted().mNodes[i]
-            val nodeMarker = Marker(mMapView)
-            nodeMarker.position = node.mLocation
-            nodeMarker.title = node.mInstructions
-            mMapView!!.overlays.add(nodeMarker)
-        }
-        val roadOverlay = RoadManager.buildRoadOverlay(road.getCompleted())
-        mMapView!!.overlays.add(roadOverlay)
 
         //needed for pinch zooms
         mMapView!!.setMultiTouchControls(true)
@@ -175,18 +214,36 @@ class MapFragment : Fragment() {
         mMapView!!.invalidate()
     }
 
-    suspend fun printMyLocation() {
-        while (isPrinting.get()) {
-            if (mLocationOverlay != null && mLocationOverlay?.myLocation != null) {
-                Log.i(
-                    "myLocation", "\nвысота: ${mLocationOverlay!!.myLocation.altitude};\n" +
-                            "широта: ${mLocationOverlay!!.myLocation.latitude};\n" +
-                            "долгота: ${mLocationOverlay!!.myLocation.longitude};"
+
+    override fun onLocationChanged(location: Location?, source: IMyLocationProvider?) {
+        if (mMapView == null || speedometer == null || location == null) return
+        gpsSpeed = location.speed
+        Toast.makeText(context, gpsSpeed.toString(), Toast.LENGTH_SHORT).show()
+        speedometer!!.speedTo(gpsSpeed, 100)
+        if (mLocationOverlay != null && mLocationOverlay?.myLocation != null && mLocationOverlay!!.isFollowLocationEnabled) {
+            val myPosition =
+                GeoPoint(
+                    mLocationOverlay!!.myLocation.latitude,
+                    mLocationOverlay!!.myLocation.longitude
                 )
-                delay(5000)
-            }
+            mMapView!!.controller.animateTo(myPosition)
         }
     }
+
+    companion object {
+        private const val PREFS_NAME = "org.andnav.osm.prefs"
+        private const val PREFS_TILE_SOURCE = "tilesource"
+        private const val PREFS_LATITUDE_STRING = "latitudeString"
+        private const val PREFS_LONGITUDE_STRING = "longitudeString"
+        private const val PREFS_ORIENTATION = "orientation"
+        private const val PREFS_ZOOM_LEVEL_DOUBLE = "zoomLevelDouble"
+        private const val MENU_ABOUT = Menu.FIRST + 1
+        private const val MENU_LAST_ID = MENU_ABOUT + 1 // Always set to last unused id
+        fun newInstance(): MapFragment {
+            return MapFragment()
+        }
+    }
+
 
     private suspend fun getWebSocketConnection() {
         val gson = GsonBuilder().setPrettyPrinting()
@@ -223,18 +280,18 @@ class MapFragment : Fragment() {
         }
     }
 
-    companion object {
-        private const val PREFS_NAME = "org.andnav.osm.prefs"
-        private const val PREFS_TILE_SOURCE = "tilesource"
-        private const val PREFS_LATITUDE_STRING = "latitudeString"
-        private const val PREFS_LONGITUDE_STRING = "longitudeString"
-        private const val PREFS_ORIENTATION = "orientation"
-        private const val PREFS_ZOOM_LEVEL_DOUBLE = "zoomLevelDouble"
-        private const val MENU_ABOUT = Menu.FIRST + 1
-        private const val MENU_LAST_ID = MENU_ABOUT + 1 // Always set to last unused id
-        fun newInstance(): MapFragment {
-            return MapFragment()
+    suspend fun printMyLocation() {
+        while (isPrinting.get()) {
+            if (mLocationOverlay != null && mLocationOverlay?.myLocation != null) {
+                Log.i(
+                    "myLocation", "\nвысота: ${mLocationOverlay!!.myLocation.altitude};\n" +
+                            "широта: ${mLocationOverlay!!.myLocation.latitude};\n" +
+                            "долгота: ${mLocationOverlay!!.myLocation.longitude};"
+                )
+                delay(5000)
+            }
         }
     }
+
 }
 

@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools">
+    <data>
+        <import type="android.view.View"/>
+        <variable
+            name="isStarted"
+            type="java.lang.Boolean" />
+        <variable
+            name="visibility"
+            type="java.lang.Boolean" />
+        <variable
+            name="visibility2"
+            type="java.lang.Boolean" />
+    </data>
+<FrameLayout
+    android:layout_width="fill_parent"
+    android:layout_height="fill_parent"
+    android:orientation="vertical">
+
+    <org.osmdroid.views.MapView android:id="@+id/map"
+        android:layout_width="fill_parent"
+        android:layout_height="fill_parent" >
+
+    </org.osmdroid.views.MapView>
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <ImageButton
+            android:id="@+id/stop_track"
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:layout_below="@+id/ic_center_map"
+            android:layout_alignParentEnd="true"
+            android:layout_marginEnd="10dp"
+            android:layout_marginBottom="10dp"
+            android:scaleType="fitXY"
+            android:background="#00ffffff"
+            android:contentDescription="@string/follow_my_location_button"
+            android:cropToPadding="true"
+            android:src="@mipmap/ic_cancel"
+            android:visibility="@{visibility2 ? View.VISIBLE : View.GONE, default=gone}"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            tools:ignore="DuplicateSpeakableTextCheck" />
+
+        <ImageButton
+            android:id="@+id/ic_rotation"
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:layout_below="@+id/ic_center_map"
+            android:layout_alignParentEnd="true"
+            android:layout_marginTop="10dp"
+            android:layout_marginEnd="10dp"
+            android:background="#00ffffff"
+            android:contentDescription="@string/follow_my_location_button"
+            android:cropToPadding="true"
+            android:src="@mipmap/ic_arrow_round"
+            android:scaleType="fitXY"
+            android:visibility="visible"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/ic_follow_me"
+            tools:ignore="DuplicateSpeakableTextCheck" />
+
+        <ImageButton
+            android:id="@+id/ic_follow_me"
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:layout_below="@+id/ic_center_map"
+            android:layout_alignParentEnd="true"
+            android:layout_marginTop="10dp"
+            android:layout_marginEnd="10dp"
+            android:background="#00ffffff"
+            android:contentDescription="@string/follow_my_location_button"
+            android:cropToPadding="true"
+            android:src="@drawable/osm_ic_follow_me"
+            android:visibility="visible"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/ic_center_map" />
+
+        <ImageButton
+            android:id="@+id/ic_center_map"
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:layout_marginTop="10dp"
+            android:layout_marginEnd="10dp"
+            android:background="#00ffffff"
+            android:contentDescription="@string/center_map_on_me_button"
+            android:cropToPadding="true"
+            android:src="@drawable/osm_ic_center_map"
+            android:visibility="visible"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            tools:ignore="RedundantDescriptionCheck" />
+
+        <com.github.anastr.speedviewlib.TubeSpeedometer
+            android:id="@+id/speedView"
+            android:layout_width="100dp"
+            android:layout_height="100dp"
+            android:layout_alignParentStart="true"
+            android:layout_alignParentTop="true"
+            android:layout_marginStart="20dp"
+            android:layout_marginTop="20dp"
+            android:visibility="visible"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <Button
+            android:id="@+id/cancel_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|end"
+            android:layout_marginEnd="20dp"
+            android:layout_marginBottom="20dp"
+            android:text="Cancel"
+            android:visibility="@{visibility ? View.VISIBLE : View.GONE, default=gone}"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <Button
+            android:id="@+id/start_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|start"
+            android:layout_marginStart="20dp"
+            android:layout_marginBottom="20dp"
+            android:text="Go"
+            android:visibility="@{visibility ? View.VISIBLE : View.GONE, default=gone}"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent" />
+    </androidx.constraintlayout.widget.ConstraintLayout>
+</FrameLayout>
+</layout>

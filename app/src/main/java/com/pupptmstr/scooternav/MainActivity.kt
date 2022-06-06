@@ -1,78 +1,70 @@
 package com.pupptmstr.scooternav
 
 import android.Manifest
-import android.content.pm.PackageManager
 import android.os.Bundle
 import android.preference.PreferenceManager
+import android.util.Log
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
-import org.osmdroid.config.Configuration.*
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import org.osmdroid.util.GeoPoint
-import org.osmdroid.views.MapView
-import java.util.*
+import androidx.fragment.app.commit
+import com.pupptmstr.scooternav.databinding.ActivityMainBinding
+import org.osmdroid.config.Configuration.getInstance
 
 class MainActivity : AppCompatActivity() {
-    private lateinit var mapFragment: MapFragment
-    private val REQUEST_PERMISSIONS_REQUEST_CODE = 1
+
+    private lateinit var binding: ActivityMainBinding
+
     private val FRAGMENT_TAG = "com.pupptmstr.MAP_FRAGMENT_TAG"
+    private val permissions = arrayOf(
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.WRITE_EXTERNAL_STORAGE
+    )
+
+    private val requestMultiplePermissions = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+        permissions.forEach {
+            when {
+                it.value -> {
+                    // TODO() permission accepted
+                }
+                !shouldShowRequestPermissionRationale(it.key) -> {
+                    // TODO() don't ask again
+                }
+                else -> {
+                    // TODO() permission denied
+                }
+            }
+            Log.e("DEBUG", "${it.key} = ${it.value}")
+        }
+    }
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState);
+        super.onCreate(savedInstanceState)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        val view = binding.root
+        setContentView(view)
+        checkPermissions(permissions)
 
-        //handle permissions first, before map is created. not depicted here
-        requestPermissionsIfNecessary(arrayOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.WRITE_EXTERNAL_STORAGE
-        ))
-
-        //inflate and create the map
-        setContentView(R.layout.activity_main)
-
-        val fm = this.supportFragmentManager
-        if (fm.findFragmentByTag(FRAGMENT_TAG) == null) {
-            mapFragment = MapFragment.newInstance()
-            fm.beginTransaction().add(R.id.map_container, mapFragment, FRAGMENT_TAG).commit()
-        }
-
-        getInstance().load(this, PreferenceManager.getDefaultSharedPreferences(this));
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        val permissionsToRequest = ArrayList<String>();
-        var i = 0;
-        while (i < grantResults.size) {
-            permissionsToRequest.add(permissions[i]);
-            i++;
-        }
-        if (permissionsToRequest.size > 0) {
-            ActivityCompat.requestPermissions(
-                this,
-                permissionsToRequest.toTypedArray(),
-                REQUEST_PERMISSIONS_REQUEST_CODE);
-        }
-    }
-
-
-    private fun requestPermissionsIfNecessary(permissions: Array<String>) {
-        val permissionsToRequest: ArrayList<String> = ArrayList()
-        for (permission in permissions) {
-            if (ContextCompat.checkSelfPermission(this, permission)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                // Permission is not granted
-                permissionsToRequest.add(permission)
+        if (supportFragmentManager.findFragmentByTag(FRAGMENT_TAG) == null) {
+            supportFragmentManager.commit {
+                add(R.id.map_container, MapFragment(), FRAGMENT_TAG)
             }
         }
-        if (permissionsToRequest.size > 0) {
-            ActivityCompat.requestPermissions(
-                this,
-                permissionsToRequest.toArray(arrayOfNulls(0)),
-                REQUEST_PERMISSIONS_REQUEST_CODE
-            )
+
+        getInstance().load(this, PreferenceManager.getDefaultSharedPreferences(this))
+    }
+
+    private fun checkPermissions(permissions: Array<String>) {
+        for (permission in permissions) {
+            if (shouldShowRequestPermissionRationale(permission)) {
+                // explain to the user why we need this permission
+                break
+            }
+            else {
+                requestMultiplePermissions.launch(permissions)
+            }
         }
     }
+
 }

@@ -12,23 +12,21 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
 import android.util.Log
-import android.view.*
+import android.view.LayoutInflater
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.viewModelScope
 import com.github.anastr.speedviewlib.TubeSpeedometer
-import com.google.gson.FieldNamingPolicy
-import com.google.gson.GsonBuilder
 import com.pupptmstr.scooternav.databinding.MapFragmentBinding
-import com.pupptmstr.scooternav.models.PathQueryResult
-import com.pupptmstr.scooternav.models.RequestPathWebsocketMessage
+import com.pupptmstr.scooternav.models.Coordinates
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.websocket.*
-import io.ktor.http.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -36,6 +34,7 @@ import kotlinx.coroutines.launch
 import org.osmdroid.bonuspack.routing.OSRMRoadManager
 import org.osmdroid.bonuspack.routing.Road
 import org.osmdroid.bonuspack.routing.RoadManager
+import org.osmdroid.bonuspack.routing.RoadNode
 import org.osmdroid.events.MapEventsReceiver
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
@@ -365,41 +364,6 @@ class MapFragment : Fragment(), MapEventsReceiver, View.OnClickListener, Locatio
         private const val ORIENTATION = "orientation"
     }
 
-
-    private suspend fun getWebSocketConnection() {
-        val gson = GsonBuilder().setPrettyPrinting()
-            .setFieldNamingPolicy(FieldNamingPolicy.UPPER_CAMEL_CASE).create()
-        client.ws(
-            method = HttpMethod.Get,
-            host = "pupptmstr.simsim.ftp.sh",
-            port = 4115,
-            path = "/api/v1/client"
-        ) {
-            try {
-                webSocketSession = this
-                while (isPrinting.get()) {
-                    if (mLocationOverlay.location != null) {
-                        val pathRequest = RequestPathWebsocketMessage(334409, 9724356897)
-                        val message = gson.toJson(pathRequest).toString()
-                        send(Frame.Text(message))
-                        when (val respond = incoming.receive()) {
-                            is Frame.Text -> {
-                                val respondMessage = respond.readText()
-                                val respondBody =
-                                    gson.fromJson(respondMessage, PathQueryResult::class.java)
-                                Log.i("myPath", "Path length = ${respondBody.totalLength}")
-                            }
-                            else -> {}
-                        }
-                        delay(15000)
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-    }
-
     override fun onClick(v: View) {
         when (v.id) {
             R.id.start_button -> startTrack()
@@ -419,6 +383,9 @@ class MapFragment : Fragment(), MapEventsReceiver, View.OnClickListener, Locatio
         endPoint = null
         binding.visibility2 = false
         removeMarkersAndPolyline()
+        lifecycleScope.launch {
+            mapViewModel.closeWebSocket()
+        }
     }
 
     private fun rotateMap() {
@@ -444,6 +411,9 @@ class MapFragment : Fragment(), MapEventsReceiver, View.OnClickListener, Locatio
         }
         mMapView.invalidate()
         binding.visibility = false
+        lifecycleScope.launch {
+            mapViewModel.getWebSocketConnection(client)
+        }
     }
 
     private fun cancelTrack() {
@@ -459,7 +429,7 @@ class MapFragment : Fragment(), MapEventsReceiver, View.OnClickListener, Locatio
                     mLocationOverlay.location.latitude,
                     mLocationOverlay.location.longitude
                 )
-            mMapView.controller.animateTo(myPosition, 16.5, 2500)
+            mMapView.controller.animateTo(myPosition, 16.5, 900)
         }
     }
 
@@ -510,6 +480,25 @@ class MapFragment : Fragment(), MapEventsReceiver, View.OnClickListener, Locatio
         val prevLocation = mLocationOverlay.location
         mLocationOverlay.location = newLocation
         mLocationOverlay.setAccuracy(location.accuracy.toInt())
+
+        if (prevLocation != null && location.provider == LocationManager.GPS_PROVIDER) {
+            mSpeed = location.speed * 3.6
+            speedometer.speedTo(mSpeed.toFloat(), 100)
+
+            // TODO: check if speed is not too small
+            if (mSpeed >= 0.1) {
+                mAzimuthAngleSpeed = location.bearing
+                mLocationOverlay.setBearing(mAzimuthAngleSpeed)
+            }
+        }
+        if (isFollowMode) {
+            //keep the map view centered on current location:
+            mMapView.controller.animateTo(newLocation, 17.0, null, -mAzimuthAngleSpeed)
+        } else {
+            //just redraw the location overlay:
+            mMapView.invalidate()
+        }
+
         if (isStarted) {
             val userPoint = mLocationOverlay.location
             val polyline = RoadManager.buildRoadOverlay(mRoads, Color.BLUE, 10.0f)
@@ -532,7 +521,36 @@ class MapFragment : Fragment(), MapEventsReceiver, View.OnClickListener, Locatio
             val linePoint1 = polyline.actualPoints[index]
             val linePoint2 = polyline.actualPoints[index + 1]
             val nearestPoint = nearestPointOnSegment(userPoint, linePoint1, linePoint2)
+            lifecycleScope.launch {
+                val nodesLikeSecond = mRoads?.mNodes
+                val distances = nodesLikeSecond?.map {
+                    userPoint.distanceToAsDouble(it.mLocation) to nodesLikeSecond.indexOf(it)
+                }?.sortedBy { it.first }
+                if (nodesLikeSecond != null && distances != null) {
+                    val closestIndex = distances[0].second
+                    val node1 = nodesLikeSecond[closestIndex]
+                    val node2 = if (closestIndex != 0 && closestIndex != nodesLikeSecond.indices.last) {
+                        val sortedByIndices = distances.sortedBy { it.second }
+                        val previousNode = sortedByIndices[closestIndex - 1]
+                        val nextNode = sortedByIndices[closestIndex + 1]
+                        if (previousNode.first < nextNode.first) {
+                            nodesLikeSecond[previousNode.second]
+                        } else {
+                            nodesLikeSecond[nextNode.second]
+                        }
+                    } else if (closestIndex == 0) {
+                        nodesLikeSecond[1]
+                    } else {
+                        nodesLikeSecond[nodesLikeSecond.indices.last - 1]
+                    }
+                    val coords1 =
+                        Coordinates(node1.mLocation.latitude, node1.mLocation.longitude)
+                    val coords2 =
+                        Coordinates(node2.mLocation.latitude, node2.mLocation.longitude)
+                    mapViewModel.sendSpeedAndGeoData(mSpeed, coords1, coords2)
 
+                }
+            }
             if (userPoint.distanceToAsDouble(nearestPoint) > 100) {
                 Toast.makeText(
                     requireActivity(),
@@ -545,24 +563,6 @@ class MapFragment : Fragment(), MapEventsReceiver, View.OnClickListener, Locatio
                 startPoint = polyline.actualPoints[0]
                 updateUIPolyline(polyline)
             }
-        }
-
-        if (prevLocation != null && location.provider == LocationManager.GPS_PROVIDER) {
-            mSpeed = location.speed * 3.6
-            speedometer.speedTo(mSpeed.toFloat(), 100)
-
-            // TODO: check if speed is not too small
-            if (mSpeed >= 0.1) {
-                mAzimuthAngleSpeed = location.bearing
-                mLocationOverlay.setBearing(mAzimuthAngleSpeed)
-            }
-        }
-        if (isFollowMode) {
-            //keep the map view centered on current location:
-            mMapView.controller.animateTo(newLocation, 17.0, null, -mAzimuthAngleSpeed)
-        } else {
-            //just redraw the location overlay:
-            mMapView.invalidate()
         }
     }
 
